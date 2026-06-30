@@ -51,14 +51,16 @@ export const DocumentViewer: React.FC = () => {
     toastTimeoutRef.current = window.setTimeout(() => setToastMessage(null), 8000);
   };
 
-  const updateDecision = async (entityId: number, decision: EntityDecision) => {
+  const updateDecision = async (entityId: number, decision: EntityDecision, skipUndo: boolean = false) => {
     const entityIndex = entities.findIndex(e => e.id === entityId);
     if (entityIndex === -1) return;
     
     const previous = entities[entityIndex].decision;
     if (previous === decision) return;
 
-    setUndoStack(prev => [...prev.slice(-19), { id: entityId, previous }]);
+    if (!skipUndo) {
+      setUndoStack(prev => [...prev.slice(-19), { id: entityId, previous }]);
+    }
 
     setEntities(prev => prev.map(e => e.id === entityId ? { ...e, decision } : e));
     
@@ -79,7 +81,7 @@ export const DocumentViewer: React.FC = () => {
     if (undoStack.length === 0) return;
     const lastAction = undoStack[undoStack.length - 1];
     setUndoStack(prev => prev.slice(0, -1));
-    await updateDecision(lastAction.id, lastAction.previous);
+    await updateDecision(lastAction.id, lastAction.previous, true);
     setToastMessage(null);
   };
 
