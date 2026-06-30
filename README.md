@@ -2,6 +2,8 @@
 
 A flow-first document review workspace that lets paralegals process hundreds of documents by spending attention only on what's uncertain.
 
+** [Watch the 2-minute Demo Video](https://youtu.be/HJgyLkSS4OU)**
+
 ## Quickstart
 
 Run the following command to start both the backend and frontend simultaneously:
