@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { Entity, AuditLog } from '../types';
+import type { Entity, AuditLog, EntityDecision } from '../types';
 import { ActivePanel } from '../types';
 import { useSession } from '../store/SessionContext';
 
@@ -7,6 +7,7 @@ export const RightSidebar: React.FC = () => {
   const { state, updateState } = useSession();
   const [entities, setEntities] = useState<Entity[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const tabs = [
     { id: ActivePanel.ENTITIES, label: 'Entities' },
@@ -15,7 +16,7 @@ export const RightSidebar: React.FC = () => {
   ];
 
   useEffect(() => {
-    if (state.active_panel === ActivePanel.ENTITIES && state.current_document_id) {
+    if (state.current_document_id && (state.active_panel === ActivePanel.ENTITIES || state.active_panel === ActivePanel.SEARCH)) {
       fetch(`/api/documents/${state.current_document_id}`)
         .then(res => res.json())
         .then(data => {
@@ -94,19 +95,57 @@ export const RightSidebar: React.FC = () => {
 
         {state.active_panel === ActivePanel.SEARCH && (
           <div className="flex flex-col h-full">
-            <div className="relative mb-4">
+            <div className="relative mb-4 shrink-0">
               <span className="absolute left-3 top-2.5 text-gray-400">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
               </span>
               <input 
                 id="global-search-input"
                 type="text" 
-                placeholder="Search entities... (/)"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search in document... (/)"
                 className="w-full bg-white border border-gray-200/80 rounded-md py-1.5 pl-8 pr-3 text-[13px] focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition-shadow placeholder-gray-400"
               />
             </div>
-            <div className="flex-1 flex items-center justify-center text-gray-400 text-[13px]">
-              Search not connected
+            
+            <div className="flex-1 overflow-y-auto pr-1">
+              {!searchQuery ? (
+                <div className="flex items-center justify-center text-gray-400 text-[13px] h-32">
+                  Type to search entities
+                </div>
+              ) : entities.filter(e => e.text.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 ? (
+                <div className="flex items-center justify-center text-gray-400 text-[13px] h-32">
+                  No matching entities found
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {entities
+                    .filter(e => e.text.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .reduce((unique, item) => {
+                      if (!unique.find(i => i.text === item.text)) unique.push(item);
+                      return unique;
+                    }, [] as typeof entities)
+                    .map(ent => (
+                      <div
+                        key={`search-${ent.id}`}
+                        className="group flex flex-col gap-1 cursor-pointer"
+                        onClick={() => window.dispatchEvent(new CustomEvent('focus-entity', { detail: { entityId: ent.id } }))}
+                      >
+                        <div className="flex justify-between items-start">
+                          <span className="font-medium text-[13px] text-gray-900 leading-tight group-hover:underline decoration-gray-300 underline-offset-2">{ent.text}</span>
+                          <span className={`text-[10px] font-medium tracking-wide uppercase mt-0.5 ${
+                            ent.decision === 'approved' ? 'text-black' :
+                            ent.decision === 'rejected' ? 'text-gray-400 line-through' : 'text-amber-500'
+                          }`}>
+                            {ent.decision === 'approved' ? 'REDACT' : ent.decision === 'rejected' ? 'KEEP' : 'PENDING'}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-gray-400">{ent.type}</span>
+                      </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
