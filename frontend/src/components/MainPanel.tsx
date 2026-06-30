@@ -11,7 +11,7 @@ export const MainPanel: React.FC = () => {
     const formData = new FormData();
     acceptedFiles.forEach(file => formData.append('files', file));
     try {
-      await fetch('http://localhost:8000/api/documents', {
+      await fetch('/api/documents', {
         method: 'POST',
         body: formData
       });

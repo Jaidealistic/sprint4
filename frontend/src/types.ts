@@ -1,33 +1,37 @@
-export enum DocumentStatus {
-  UPLOADED = "UPLOADED",
-  QUEUED = "QUEUED",
-  PROCESSING = "PROCESSING",
-  READY = "READY",
-  UNDER_REVIEW = "UNDER_REVIEW",
-  APPROVED = "APPROVED",
-  EXPORT_READY = "EXPORT_READY",
-  EXPORTED = "EXPORTED",
-  PROCESSING_FAILED = "PROCESSING_FAILED",
-  MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
-}
+export const DocumentStatus = {
+  UPLOADED: "UPLOADED",
+  QUEUED: "QUEUED",
+  PROCESSING: "PROCESSING",
+  READY: "READY",
+  UNDER_REVIEW: "UNDER_REVIEW",
+  APPROVED: "APPROVED",
+  EXPORT_READY: "EXPORT_READY",
+  EXPORTED: "EXPORTED",
+  PROCESSING_FAILED: "PROCESSING_FAILED",
+  MANUAL_REVIEW_REQUIRED: "MANUAL_REVIEW_REQUIRED"
+} as const;
+export type DocumentStatus = typeof DocumentStatus[keyof typeof DocumentStatus];
 
-export enum RiskTier {
-  NEEDS_ATTENTION = "needs_attention",
-  QUICK_REVIEW = "quick_review",
-  READY = "ready"
-}
+export const RiskTier = {
+  NEEDS_ATTENTION: "needs_attention",
+  QUICK_REVIEW: "quick_review",
+  READY: "ready"
+} as const;
+export type RiskTier = typeof RiskTier[keyof typeof RiskTier];
 
-export enum EntityDecision {
-  PENDING = "pending",
-  APPROVED = "approved",
-  REJECTED = "rejected"
-}
+export const EntityDecision = {
+  PENDING: "pending",
+  APPROVED: "approved",
+  REJECTED: "rejected"
+} as const;
+export type EntityDecision = typeof EntityDecision[keyof typeof EntityDecision];
 
-export enum ActivePanel {
-  ENTITIES = "entities",
-  SEARCH = "search",
-  AUDIT = "audit"
-}
+export const ActivePanel = {
+  ENTITIES: "entities",
+  SEARCH: "search",
+  AUDIT: "audit"
+} as const;
+export type ActivePanel = typeof ActivePanel[keyof typeof ActivePanel];
 
 export interface Document {
   id: number;
@@ -38,6 +42,7 @@ export interface Document {
   risk_score: number | null;
   page_count: number | null;
   ocr_warning: boolean;
+  text_content: string | null;
   created_at: string;
 }
 
@@ -59,7 +64,7 @@ export interface Cluster {
   id: number;
   representative_text: string;
   entity_type: string;
-  member_count: int;
+  member_count: number;
 }
 
 export interface Rule {

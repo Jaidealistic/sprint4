@@ -12,7 +12,8 @@ cd backend
 python -m venv venv
 .\venv\Scripts\activate
 pip install fastapi uvicorn[standard] sqlmodel PyMuPDF python-multipart pydantic
-uvicorn main:app --reload
+# IMPORTANT: Run without --reload on Windows to prevent port locking/zombie processes
+python -B -m uvicorn main:app --port 8001
 
 # Terminal 2: Frontend
 cd frontend
@@ -20,7 +21,7 @@ npm install
 npm run dev
 ```
 
-Visit `http://localhost:5173` to access the application.
+Visit `http://localhost:5173` to access the application (the frontend Vite proxy will automatically route `/api` calls to port 8001).
 
 ## Core Principles
 

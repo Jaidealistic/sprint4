@@ -1,145 +1,164 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import type { Document, Entity } from '../types';
+import { EntityDecision } from '../types';
 import { useSession } from '../store/SessionContext';
-import { Document, Entity, EntityDecision } from '../types';
 
 export const DocumentViewer: React.FC = () => {
-  const { state } = useSession();
+  const { state, updateState } = useSession();
   const [doc, setDoc] = useState<Document | null>(null);
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  const [focusedEntityIndex, setFocusedEntityIndex] = useState<number>(0);
-  const [undoStack, setUndoStack] = useState<{id: number, prev: EntityDecision}[]>([]);
+  const [focusedEntityIndex, setFocusedEntityIndex] = useState<number>(-1);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [undoStack, setUndoStack] = useState<{id: number, previous: EntityDecision}[]>([]);
+  const toastTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!state.current_document_id) {
+    if (state.current_document_id) {
+      fetch(`/api/documents/${state.current_document_id}`)
+        .then(res => res.json())
+        .then(data => {
+          setDoc(data.document);
+          setEntities(data.entities || []);
+          setFocusedEntityIndex(-1);
+        })
+        .catch(console.error);
+    } else {
       setDoc(null);
       setEntities([]);
-      return;
     }
-    
-    setLoading(true);
-    fetch(`http://localhost:8000/api/documents/${state.current_document_id}`)
-      .then(res => res.json())
-      .then(data => {
-        setDoc(data.document);
-        setEntities(data.entities);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setError("Failed to load document");
-        setLoading(false);
-      });
   }, [state.current_document_id]);
 
-  const handleDecision = useCallback(async (entityId: number, decision: EntityDecision) => {
-    // Optimistic update
+  useEffect(() => {
+    const handleFocusEntity = (e: Event) => {
+      const customEvent = e as CustomEvent<{entityId: number}>;
+      const index = entities.findIndex(ent => ent.id === customEvent.detail.entityId);
+      if (index !== -1) {
+        setFocusedEntityIndex(index);
+        document.getElementById(`ent-${customEvent.detail.entityId}`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }
+    };
+
+    window.addEventListener('focus-entity', handleFocusEntity);
+    return () => window.removeEventListener('focus-entity', handleFocusEntity);
+  }, [entities]);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = window.setTimeout(() => setToastMessage(null), 8000);
+  };
+
+  const updateDecision = async (entityId: number, decision: EntityDecision) => {
     const entityIndex = entities.findIndex(e => e.id === entityId);
     if (entityIndex === -1) return;
     
-    const previousDecision = entities[entityIndex].decision;
-    
-    setUndoStack(prev => {
-      const newStack = [...prev, { id: entityId, prev: previousDecision }];
-      return newStack.slice(-20); // Keep last 20
-    });
-    
-    const previousEntities = [...entities];
+    const previous = entities[entityIndex].decision;
+    if (previous === decision) return;
+
+    setUndoStack(prev => [...prev.slice(-19), { id: entityId, previous }]);
+
     setEntities(prev => prev.map(e => e.id === entityId ? { ...e, decision } : e));
     
     try {
-      const res = await fetch(`http://localhost:8000/api/entities/${entityId}/decision`, {
+      await fetch(`/api/entities/${entityId}/decision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decision })
       });
-      if (!res.ok) throw new Error("Failed to update");
+      updateState({ last_updated: Date.now() });
     } catch (e) {
-      // Revert on failure
-      setEntities(previousEntities);
-      setUndoStack(prev => prev.filter(item => item.id !== entityId || item.prev !== previousDecision));
       console.error(e);
+      setEntities(prev => prev.map(e => e.id === entityId ? { ...e, decision: previous } : e));
     }
-  }, [entities]);
+  };
 
-  const undoLastAction = useCallback(async () => {
+  const undoLastAction = async () => {
     if (undoStack.length === 0) return;
     const lastAction = undoStack[undoStack.length - 1];
     setUndoStack(prev => prev.slice(0, -1));
-    await handleDecision(lastAction.id, lastAction.prev);
-    // Note: The handleDecision call above will add the "reverted" action back to the undo stack, 
-    // which isn't ideal for a true undo, but sufficient for a quick mock. Let's fix that.
-    setUndoStack(prev => prev.slice(0, -1)); 
-  }, [undoStack, handleDecision]);
+    await updateDecision(lastAction.id, lastAction.previous);
+    setToastMessage(null);
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === 'INPUT') return;
       if (!doc || entities.length === 0) return;
-      
+
       const sortedEntities = [...entities].sort((a, b) => a.start_offset - b.start_offset);
-      const activeEntity = sortedEntities[focusedEntityIndex];
 
       if (e.key === 'j' || e.key === 'ArrowDown') {
-        setFocusedEntityIndex(prev => Math.min(prev + 1, entities.length - 1));
-      } else if (e.key === 'k' || e.key === 'ArrowUp') {
-        setFocusedEntityIndex(prev => Math.max(prev - 1, 0));
-      } else if (e.key === 'a') {
-        if (activeEntity) {
-          handleDecision(activeEntity.id, EntityDecision.APPROVED);
-          setFocusedEntityIndex(prev => Math.min(prev + 1, entities.length - 1));
-        }
-      } else if (e.key === 'r') {
-        if (activeEntity) {
-          handleDecision(activeEntity.id, EntityDecision.REJECTED);
-          setFocusedEntityIndex(prev => Math.min(prev + 1, entities.length - 1));
-        }
-      } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
-        undoLastAction();
-      } else if (e.key === '/') {
         e.preventDefault();
-        // focus search
+        const next = Math.min(focusedEntityIndex + 1, sortedEntities.length - 1);
+        setFocusedEntityIndex(next);
+        document.getElementById(`ent-${sortedEntities[next].id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = Math.max(focusedEntityIndex - 1, 0);
+        setFocusedEntityIndex(prev);
+        document.getElementById(`ent-${sortedEntities[prev].id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else if (e.key === 'a' || e.key === 'A') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          const pending = entities.filter(ent => ent.decision === EntityDecision.PENDING);
+          if (pending.length > 0) {
+            pending.forEach(ent => updateDecision(ent.id, EntityDecision.APPROVED));
+            showToast(`${pending.length} entities set to REDACT`);
+          }
+        } else if (focusedEntityIndex >= 0) {
+          e.preventDefault();
+          updateDecision(sortedEntities[focusedEntityIndex].id, EntityDecision.APPROVED);
+          showToast(`Set to REDACT`);
+        }
+      } else if (e.key === 'r' || e.key === 'R') {
+        if (focusedEntityIndex >= 0 && !e.shiftKey) {
+          e.preventDefault();
+          updateDecision(sortedEntities[focusedEntityIndex].id, EntityDecision.REJECTED);
+          showToast(`Set to KEEP`);
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        undoLastAction();
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [doc, entities, focusedEntityIndex, handleDecision, undoLastAction]);
+  }, [focusedEntityIndex, entities, doc, undoStack]);
 
   if (!state.current_document_id) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
-        Select a document from the left navigation
+      <div className="flex-1 flex flex-col items-center justify-center bg-white m-6 border border-gray-200/60 rounded-md border-dashed">
+        <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+          </svg>
+        </div>
+        <p className="text-gray-500 text-sm font-medium">Select a document to review</p>
       </div>
     );
   }
 
-  if (loading) return <div className="flex-1 p-8 text-gray-500">Loading document...</div>;
-  if (error) return <div className="flex-1 p-8 text-red-500">{error}</div>;
-  if (!doc) return <div className="flex-1 p-8 text-gray-500">Document not found</div>;
+  if (!doc) return <div className="flex-1 p-8 text-gray-500 text-sm">Loading document...</div>;
 
-  // Render text with entities
-  // For MVP, we simply replace occurrences or render them as badges
-  // Since we have start_offset and end_offset, we can chunk the text
   let renderedText: React.ReactNode[] = [];
   let currentIndex = 0;
   
-  // Sort entities by start_offset
   const sortedEntities = [...entities].sort((a, b) => a.start_offset - b.start_offset);
   
   if (doc.text_content) {
     sortedEntities.forEach(ent => {
       if (ent.start_offset >= currentIndex) {
-        // Add preceding text
         renderedText.push(<span key={`text-${currentIndex}`}>{doc.text_content!.substring(currentIndex, ent.start_offset)}</span>);
         
-        // Add entity
         const isFocused = sortedEntities[focusedEntityIndex]?.id === ent.id;
         
         if (ent.decision === EntityDecision.APPROVED) {
           renderedText.push(
-            <span key={`ent-${ent.id}`} className={`bg-black text-white px-1 rounded mx-1 ${isFocused ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}>
+            <span key={`ent-${ent.id}`} id={`ent-${ent.id}`} className={`bg-black text-white px-1.5 py-0.5 rounded-sm mx-0.5 ${isFocused ? 'ring-2 ring-gray-400 ring-offset-2' : ''}`}>
               [REDACTED]
             </span>
           );
@@ -148,13 +167,15 @@ export const DocumentViewer: React.FC = () => {
           renderedText.push(
             <span 
               key={`ent-${ent.id}`} 
-              className={`px-1 rounded mx-1 cursor-pointer border transition-all
-                ${isRejected ? 'bg-gray-200 line-through text-gray-500' : 'bg-yellow-200 border-yellow-400'}
-                ${isFocused ? 'ring-2 ring-blue-500 ring-offset-1 scale-105' : ''}
-              `}
-              onClick={() => handleDecision(ent.id, isRejected ? EntityDecision.PENDING : EntityDecision.APPROVED)}
+              id={`ent-${ent.id}`}
+              className={`px-1 mx-0.5 rounded-sm cursor-pointer transition-colors ${
+                isRejected ? 'text-gray-400 line-through' : 'bg-amber-100/50 border-b border-amber-300 text-amber-900'
+              } ${isFocused ? 'ring-2 ring-black ring-offset-2 bg-transparent border-transparent' : ''}`}
+              onClick={() => {
+                setFocusedEntityIndex(sortedEntities.findIndex(e => e.id === ent.id));
+              }}
             >
-              {ent.text}
+              {doc.text_content!.substring(ent.start_offset, ent.end_offset)}
             </span>
           );
         }
@@ -162,15 +183,27 @@ export const DocumentViewer: React.FC = () => {
         currentIndex = ent.end_offset;
       }
     });
-    // Add remaining text
     if (currentIndex < doc.text_content.length) {
       renderedText.push(<span key={`text-end`}>{doc.text_content.substring(currentIndex)}</span>);
     }
   }
 
   return (
-    <div className="flex-1 bg-white m-4 rounded shadow overflow-y-auto p-8 font-serif leading-relaxed text-lg whitespace-pre-wrap">
-      {renderedText.length > 0 ? renderedText : "No text content available for this document."}
+    <div className="flex-1 bg-white mx-8 my-6 px-16 py-12 rounded-sm shadow-[0_1px_3px_0_rgba(0,0,0,0.05)] overflow-y-auto font-sans leading-loose text-[15px] text-gray-700 whitespace-pre-wrap relative border border-gray-200/60 max-w-4xl self-center w-full">
+      {renderedText.length > 0 ? renderedText : <span className="text-gray-400">No text content available for this document.</span>}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-black text-white px-4 py-2.5 rounded shadow-xl flex items-center gap-4 border border-gray-800">
+          <span className="text-[13px] font-medium">{toastMessage}</span>
+          <button
+            onClick={undoLastAction}
+            className="text-gray-400 font-medium text-[13px] hover:text-white px-2 py-0.5 rounded transition-colors"
+          >
+            Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 };

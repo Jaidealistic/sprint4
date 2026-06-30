@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { ActivePanel, SessionState } from '../types';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import type { SessionState } from '../types';
+import { ActivePanel } from '../types';
 
 const defaultState: SessionState = {
   id: 1,

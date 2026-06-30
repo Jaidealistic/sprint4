@@ -9,7 +9,7 @@ const AppContent: React.FC = () => {
   const { state } = useSession();
   
   return (
-    <div className="flex h-screen overflow-hidden bg-white text-gray-900 font-sans">
+    <div className="flex h-screen overflow-hidden bg-slate-100 text-gray-900 font-sans">
       <LeftNav />
       {state.is_exporting ? <ExportDashboard /> : (
         <>

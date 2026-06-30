@@ -1,17 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import type { Entity, AuditLog } from '../types';
+import { ActivePanel } from '../types';
 import { useSession } from '../store/SessionContext';
-import { ActivePanel, Entity } from '../types';
-
-interface SearchResult {
-  entity: Entity;
-  document_id: number;
-  document_filename: string;
-}
 
 export const RightSidebar: React.FC = () => {
   const { state, updateState } = useSession();
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   const tabs = [
     { id: ActivePanel.ENTITIES, label: 'Entities' },
@@ -20,20 +15,21 @@ export const RightSidebar: React.FC = () => {
   ];
 
   useEffect(() => {
-    if (state.active_panel === ActivePanel.SEARCH && query.length > 0) {
-      const delayDebounce = setTimeout(() => {
-        fetch(`http://localhost:8000/api/search?q=${encodeURIComponent(query)}`)
-          .then(res => res.json())
-          .then(data => setResults(data.results || []))
-          .catch(console.error);
-      }, 300);
-      return () => clearTimeout(delayDebounce);
-    } else {
-      setResults([]);
+    if (state.active_panel === ActivePanel.ENTITIES && state.current_document_id) {
+      fetch(`/api/documents/${state.current_document_id}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.entities) setEntities(data.entities);
+        })
+        .catch(console.error);
+    } else if (state.active_panel === ActivePanel.AUDIT) {
+      fetch('/api/audit')
+        .then(res => res.json())
+        .then(data => setAuditLogs(data.audit_logs || []))
+        .catch(console.error);
     }
-  }, [query, state.active_panel]);
+  }, [state.active_panel, state.last_updated, state.current_document_id]);
 
-  // Handle `/` to focus search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === '/') {
@@ -49,57 +45,95 @@ export const RightSidebar: React.FC = () => {
   }, [updateState]);
 
   return (
-    <aside className="w-80 bg-white border-l border-gray-200 h-full flex flex-col">
-      <div className="flex border-b border-gray-200">
+    <aside className="w-80 bg-[#fbfbfa] border-l border-gray-200/80 h-full flex flex-col">
+      <div className="flex px-4 pt-4 border-b border-gray-200/60">
         {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => updateState({ active_panel: tab.id })}
-            className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${
+            className={`mr-6 pb-2 text-[13px] font-medium transition-colors border-b-[1.5px] ${
               state.active_panel === tab.id
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'border-black text-black'
+                : 'border-transparent text-gray-400 hover:text-gray-600'
             }`}
           >
             {tab.label}
           </button>
         ))}
       </div>
+
       <div className="flex-1 p-4 overflow-y-auto">
         {state.active_panel === ActivePanel.ENTITIES && (
-          <div className="text-gray-500 text-sm text-center mt-10">No entities selected</div>
-        )}
-        {state.active_panel === ActivePanel.SEARCH && (
-          <div className="flex flex-col gap-4">
-            <input 
-              id="global-search-input"
-              type="text" 
-              placeholder="Search entities (press / to focus)..." 
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-            />
-            {results.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {results.map((res, i) => (
-                  <div 
-                    key={i} 
-                    className="p-3 border border-gray-200 rounded hover:bg-gray-50 cursor-pointer"
-                    onClick={() => updateState({ current_document_id: res.document_id })}
-                  >
-                    <div className="font-medium text-sm text-gray-900">{res.entity.text}</div>
-                    <div className="text-xs text-gray-500 mt-1">Found in {res.document_filename}</div>
-                  </div>
-                ))}
-              </div>
+          <div className="flex flex-col gap-3">
+            {!state.current_document_id ? (
+              <div className="text-gray-400 text-[13px] text-center mt-12">No document open</div>
+            ) : entities.length === 0 ? (
+              <div className="text-gray-400 text-[13px] text-center mt-12">No entities in this document</div>
             ) : (
-              query.length > 0 && <div className="text-gray-500 text-sm text-center mt-4">No results found</div>
+              entities.map(ent => (
+                <div
+                  key={ent.id}
+                  className="group flex flex-col gap-1 cursor-pointer"
+                  onClick={() => window.dispatchEvent(new CustomEvent('focus-entity', { detail: { entityId: ent.id } }))}
+                >
+                  <div className="flex justify-between items-start">
+                    <span className="font-medium text-[13px] text-gray-900 leading-tight group-hover:underline decoration-gray-300 underline-offset-2">{ent.text}</span>
+                    <span className={`text-[10px] font-medium tracking-wide uppercase mt-0.5 ${
+                      ent.decision === 'approved' ? 'text-black' :
+                      ent.decision === 'rejected' ? 'text-gray-400 line-through' : 'text-amber-500'
+                    }`}>
+                      {ent.decision === 'approved' ? 'REDACT' : ent.decision === 'rejected' ? 'KEEP' : 'PENDING'}
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-gray-400">{ent.type}</span>
+                </div>
+              ))
             )}
-            {query.length === 0 && <div className="text-gray-500 text-sm text-center mt-10">Type to search...</div>}
           </div>
         )}
+
+        {state.active_panel === ActivePanel.SEARCH && (
+          <div className="flex flex-col h-full">
+            <div className="relative mb-4">
+              <span className="absolute left-3 top-2.5 text-gray-400">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+              </span>
+              <input 
+                id="global-search-input"
+                type="text" 
+                placeholder="Search entities... (/)"
+                className="w-full bg-white border border-gray-200/80 rounded-md py-1.5 pl-8 pr-3 text-[13px] focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 transition-shadow placeholder-gray-400"
+              />
+            </div>
+            <div className="flex-1 flex items-center justify-center text-gray-400 text-[13px]">
+              Search not connected
+            </div>
+          </div>
+        )}
+
         {state.active_panel === ActivePanel.AUDIT && (
-          <div className="text-gray-500 text-sm text-center mt-10">Audit log empty</div>
+          <div className="flex flex-col gap-4">
+            {auditLogs.length === 0 ? (
+              <div className="text-gray-400 text-[13px] text-center mt-12">No decisions recorded yet</div>
+            ) : (
+              auditLogs.map(log => (
+                <div key={log.id} className="text-[13px] flex flex-col gap-1 pb-4 border-b border-gray-100 last:border-0">
+                  <div className="flex justify-between text-gray-400 text-[11px]">
+                    <span>{new Date(log.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    <span className="font-mono">#{log.entity_id}</span>
+                  </div>
+                  <div className="text-gray-600">
+                    <span className="line-through text-gray-400">{log.previous_value}</span>
+                    <span className="mx-1.5">→</span>
+                    <span className={`font-medium ${log.new_value === 'approved' ? 'text-black' : 'text-gray-500'}`}>
+                      {log.new_value === 'approved' ? 'REDACT' : 'KEEP'}
+                    </span>
+                  </div>
+                  {log.reason && <div className="text-gray-400 text-[12px] italic">{log.reason}</div>}
+                </div>
+              ))
+            )}
+          </div>
         )}
       </div>
     </aside>
