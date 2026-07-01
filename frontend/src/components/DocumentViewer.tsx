@@ -55,14 +55,23 @@ export const DocumentViewer: React.FC = () => {
     const entityIndex = entities.findIndex(e => e.id === entityId);
     if (entityIndex === -1) return;
     
-    const previous = entities[entityIndex].decision;
+    const targetEntity = entities[entityIndex];
+    const previous = targetEntity.decision;
     if (previous === decision) return;
 
     if (!skipUndo) {
       setUndoStack(prev => [...prev.slice(-19), { id: entityId, previous }]);
     }
 
-    setEntities(prev => prev.map(e => e.id === entityId ? { ...e, decision } : e));
+    // Optimistically update this entity and all entities in the same cluster
+    setEntities(prev => prev.map(e => {
+      if (e.id === entityId) return { ...e, decision };
+      // If it belongs to the same cluster and is currently PENDING, update it
+      if (targetEntity.cluster_id && e.cluster_id === targetEntity.cluster_id && e.decision === 'pending') {
+        return { ...e, decision };
+      }
+      return e;
+    }));
     
     try {
       await fetch(`/api/entities/${entityId}/decision`, {
