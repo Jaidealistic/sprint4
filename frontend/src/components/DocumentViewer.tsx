@@ -9,7 +9,7 @@ export const DocumentViewer: React.FC = () => {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [focusedEntityIndex, setFocusedEntityIndex] = useState<number>(-1);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [undoStack, setUndoStack] = useState<{id: number, previous: EntityDecision}[]>([]);
+  const [undoStack, setUndoStack] = useState<{id: number, previous: EntityDecision}[][]>([]);
   const toastTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -59,19 +59,23 @@ export const DocumentViewer: React.FC = () => {
     const previous = targetEntity.decision;
     if (previous === decision) return;
 
-    if (!skipUndo) {
-      setUndoStack(prev => [...prev.slice(-19), { id: entityId, previous }]);
-    }
-
+    // Identify all entities that will be updated in this action
+    const affectedEntities = [{ id: entityId, previous }];
+    
     // Optimistically update this entity and all entities in the same cluster
     setEntities(prev => prev.map(e => {
       if (e.id === entityId) return { ...e, decision };
       // If it belongs to the same cluster and is currently PENDING, update it
-      if (targetEntity.cluster_id && e.cluster_id === targetEntity.cluster_id && e.decision === 'pending') {
+      if (!skipUndo && targetEntity.cluster_id && e.cluster_id === targetEntity.cluster_id && e.decision === 'pending') {
+        affectedEntities.push({ id: e.id, previous: e.decision });
         return { ...e, decision };
       }
       return e;
     }));
+
+    if (!skipUndo) {
+      setUndoStack(prev => [...prev.slice(-19), affectedEntities]);
+    }
     
     try {
       await fetch(`/api/entities/${entityId}/decision`, {
@@ -82,15 +86,23 @@ export const DocumentViewer: React.FC = () => {
       updateState({ last_updated: Date.now() });
     } catch (e) {
       console.error(e);
-      setEntities(prev => prev.map(e => e.id === entityId ? { ...e, decision: previous } : e));
+      // Revert if API fails
+      setEntities(prev => prev.map(e => {
+        const revertData = affectedEntities.find(a => a.id === e.id);
+        return revertData ? { ...e, decision: revertData.previous } : e;
+      }));
     }
   };
 
   const undoLastAction = async () => {
     if (undoStack.length === 0) return;
-    const lastAction = undoStack[undoStack.length - 1];
+    const lastActionGroup = undoStack[undoStack.length - 1];
     setUndoStack(prev => prev.slice(0, -1));
-    await updateDecision(lastAction.id, lastAction.previous, true);
+    
+    // Process undo for all affected entities in the group
+    // Use Promise.all to trigger backend updates concurrently
+    await Promise.all(lastActionGroup.map(action => updateDecision(action.id, action.previous, true)));
+    
     setToastMessage(null);
   };
 
